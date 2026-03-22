@@ -1,0 +1,30 @@
+bot:
+  discord_token_env: AI_DM_BOT_KEY
+  command_prefix: /
+  main_channel: game-session
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key_env: ANTHROPIC_API_KEY
+  max_tokens: 1500
+  temperature: 0.7
+  classifier_model: claude-haiku-4-5-20251001
+
+rag:
+  index_path: rag_index/gurps
+  top_k: 5
+  use_hybrid: true
+  chunk_max_tokens: 512
+
+game:
+  system: gurps4e
+  setting: generic_fantasy
+  auto_summary_interval: 20
+  combat_turn_timeout: 300
+  combat_afk_timeout: 600
+  max_recent_messages: 8
+
+state:
+  db_path: saves/campaign.db
+  backup_interval: 3600
