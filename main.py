@@ -5,6 +5,8 @@ import os
 import yaml
 from dotenv import load_dotenv
 
+from bot import GurpsGMClient
+
 
 def load_config(path: str = "config.yaml") -> dict:
     """Load configuration from a YAML file.
@@ -33,8 +35,19 @@ def main() -> None:
     load_dotenv()
     setup_logging()
     config = load_config()
+
     logging.info("Bot starting...")
-    logging.info(f"Main channel: {config['bot']['main_channel']}")
+    logging.info(f"Main channel: #{config['bot']['main_channel']}")
+
+    token_env_key: str = config["bot"]["discord_token_env"]
+    token: str | None = os.getenv(token_env_key)
+    if not token:
+        raise ValueError(
+            f"Discord token not found. Set {token_env_key} in your .env file."
+        )
+
+    client = GurpsGMClient(config)
+    client.run(token)
 
 
 if __name__ == "__main__":
