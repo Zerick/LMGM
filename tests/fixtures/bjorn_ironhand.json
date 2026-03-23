@@ -1,0 +1,46 @@
+{
+  "name": "Bjorn Ironhand",
+  "player_discord_id": "123456789",
+  "point_total": 150,
+  "ST": 14,
+  "DX": 12,
+  "IQ": 10,
+  "HT": 12,
+  "HP": 14,
+  "FP": 12,
+  "Will": 10,
+  "Per": 10,
+  "Basic_Speed": 6.0,
+  "Basic_Move": 6,
+  "current_hp": 14,
+  "current_fp": 12,
+  "conditions": [],
+  "skills": {
+    "Broadsword": {"level": 14, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5", "Shortsword-2", "Axe/Mace-4"]},
+    "Shield": {"level": 13, "attribute": "DX", "difficulty": "E", "defaults": ["DX-4"]},
+    "Brawling": {"level": 13, "attribute": "DX", "difficulty": "E", "defaults": ["DX-4"]},
+    "Stealth": {"level": 11, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5"]},
+    "First Aid": {"level": 10, "attribute": "IQ", "difficulty": "E", "defaults": ["IQ-4"]},
+    "Intimidation": {"level": 10, "attribute": "Will", "difficulty": "A", "defaults": ["Will-5", "ST-2"]}
+  },
+  "advantages": [
+    {"name": "Combat Reflexes", "level": 1, "point_cost": 15, "mechanical_effects": {"defense_bonus": 1, "initiative_bonus": 2, "surprise_fright_check_bonus": 6}},
+    {"name": "High Pain Threshold", "level": 1, "point_cost": 10, "mechanical_effects": {"stun_roll_bonus": 3, "ignore_shock_penalties": true}},
+    {"name": "Cowardice", "level": 1, "point_cost": -10, "mechanical_effects": {"fright_check_penalty": -2, "must_make_ht_to_enter_combat": true}}
+  ],
+  "equipment": [
+    {"name": "Broadsword", "weight": 3.0, "dr": null, "damage": "2d+1 cut / 1d+2 cr", "location": "hand"},
+    {"name": "Medium Shield", "weight": 8.0, "dr": null, "damage": null, "location": "arm"},
+    {"name": "Chain Mail Hauberk", "weight": 30.0, "dr": 4, "damage": null, "location": "torso"},
+    {"name": "Chain Mail Coif", "weight": 2.0, "dr": 4, "damage": null, "location": "head"},
+    {"name": "Backpack", "weight": 3.0, "dr": null, "damage": null, "location": "back"},
+    {"name": "Rope (10m)", "weight": 2.0, "dr": null, "damage": null, "location": "pack"}
+  ],
+  "dodge": 10,
+  "parry_skills": [
+    {"weapon": "Broadsword", "score": 11},
+    {"weapon": "Brawling", "score": 10}
+  ],
+  "block_skill": 11,
+  "active_effects": []
+}
