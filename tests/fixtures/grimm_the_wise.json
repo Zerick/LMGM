@@ -1,0 +1,51 @@
+{
+  "name": "Grimm the Wise",
+  "player_discord_id": "555000111",
+  "point_total": 150,
+  "ST": 9,
+  "DX": 11,
+  "IQ": 14,
+  "HT": 10,
+  "HP": 9,
+  "FP": 14,
+  "Will": 15,
+  "Per": 14,
+  "Basic_Speed": 5.25,
+  "Basic_Move": 5,
+  "current_hp": 9,
+  "current_fp": 14,
+  "conditions": [],
+  "skills": {
+    "Occultism": {"level": 16, "attribute": "IQ", "difficulty": "A", "defaults": ["IQ-5"]},
+    "Thaumatology": {"level": 16, "attribute": "IQ", "difficulty": "VH", "defaults": ["IQ-7"]},
+    "Research": {"level": 15, "attribute": "IQ", "difficulty": "A", "defaults": ["IQ-5"]},
+    "History": {"level": 15, "attribute": "IQ", "difficulty": "H", "defaults": ["IQ-6"]},
+    "Theology": {"level": 14, "attribute": "IQ", "difficulty": "H", "defaults": ["IQ-6"]},
+    "Alchemy": {"level": 14, "attribute": "IQ", "difficulty": "VH", "defaults": ["IQ-7"]},
+    "Diplomacy": {"level": 14, "attribute": "IQ", "difficulty": "H", "defaults": ["IQ-6", "Fast-Talk-5"]},
+    "Fast-Talk": {"level": 14, "attribute": "IQ", "difficulty": "A", "defaults": ["IQ-5"]},
+    "Staff": {"level": 11, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5"]},
+    "Meditation": {"level": 14, "attribute": "Will", "difficulty": "H", "defaults": ["Will-6"]}
+  },
+  "advantages": [
+    {"name": "Eidetic Memory", "level": 1, "point_cost": 5, "mechanical_effects": {"recall_bonus": 1, "never_forgets_text": true}},
+    {"name": "Magery", "level": 3, "point_cost": 35, "mechanical_effects": {"spell_skill_bonus": 3, "can_sense_magic": true}},
+    {"name": "Strong Will", "level": 2, "point_cost": 8, "mechanical_effects": {"will_bonus": 2}},
+    {"name": "Absent-Mindedness", "level": 1, "point_cost": -15, "mechanical_effects": {"iq_penalty_unless_concentrating": -5}},
+    {"name": "Curious", "level": 12, "point_cost": -5, "mechanical_effects": {"must_investigate_interesting_things": true}}
+  ],
+  "equipment": [
+    {"name": "Quarterstaff", "weight": 4.0, "dr": null, "damage": "1d+1 cr", "location": "hand"},
+    {"name": "Robes", "weight": 2.0, "dr": 0, "damage": null, "location": "torso"},
+    {"name": "Spellbook (Large)", "weight": 3.0, "dr": null, "damage": null, "location": "pack"},
+    {"name": "Component Pouch", "weight": 0.5, "dr": null, "damage": null, "location": "belt"},
+    {"name": "Backpack", "weight": 3.0, "dr": null, "damage": null, "location": "back"},
+    {"name": "Lantern", "weight": 2.0, "dr": null, "damage": null, "location": "pack"}
+  ],
+  "dodge": 8,
+  "parry_skills": [
+    {"weapon": "Quarterstaff", "score": 9}
+  ],
+  "block_skill": null,
+  "active_effects": []
+}

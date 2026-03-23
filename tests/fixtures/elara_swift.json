@@ -1,0 +1,48 @@
+{
+  "name": "Elara Swift",
+  "player_discord_id": "987654321",
+  "point_total": 150,
+  "ST": 10,
+  "DX": 14,
+  "IQ": 12,
+  "HT": 11,
+  "HP": 10,
+  "FP": 11,
+  "Will": 12,
+  "Per": 14,
+  "Basic_Speed": 6.25,
+  "Basic_Move": 6,
+  "current_hp": 10,
+  "current_fp": 11,
+  "conditions": [],
+  "skills": {
+    "Bow": {"level": 15, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5"]},
+    "Stealth": {"level": 15, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5"]},
+    "Tracking": {"level": 13, "attribute": "IQ", "difficulty": "A", "defaults": ["Per-5"]},
+    "Observation": {"level": 13, "attribute": "Per", "difficulty": "A", "defaults": ["Per-5"]},
+    "Climbing": {"level": 13, "attribute": "DX", "difficulty": "A", "defaults": ["DX-5"]},
+    "Knife": {"level": 13, "attribute": "DX", "difficulty": "E", "defaults": ["DX-4"]},
+    "Fast-Draw (Arrow)": {"level": 14, "attribute": "DX", "difficulty": "E", "defaults": ["DX-4"]},
+    "Navigation (Land)": {"level": 12, "attribute": "IQ", "difficulty": "A", "defaults": ["IQ-5"]}
+  },
+  "advantages": [
+    {"name": "Acute Vision", "level": 2, "point_cost": 4, "mechanical_effects": {"per_vision_bonus": 2}},
+    {"name": "Danger Sense", "level": 1, "point_cost": 15, "mechanical_effects": {"ambush_warning": true}},
+    {"name": "Night Vision", "level": 3, "point_cost": 3, "mechanical_effects": {"darkness_penalty_reduction": 3}},
+    {"name": "Overconfidence", "level": 1, "point_cost": -5, "mechanical_effects": {"must_accept_challenges": true}}
+  ],
+  "equipment": [
+    {"name": "Longbow", "weight": 3.0, "dr": null, "damage": "1d+2 imp", "location": "hand"},
+    {"name": "Quiver (20 arrows)", "weight": 1.0, "dr": null, "damage": null, "location": "back"},
+    {"name": "Long Knife", "weight": 0.75, "dr": null, "damage": "1d-1 cut / 1d-2 imp", "location": "belt"},
+    {"name": "Leather Armor", "weight": 12.0, "dr": 2, "damage": null, "location": "torso"},
+    {"name": "Leather Leggings", "weight": 4.0, "dr": 2, "damage": null, "location": "legs"},
+    {"name": "Backpack", "weight": 3.0, "dr": null, "damage": null, "location": "back"}
+  ],
+  "dodge": 10,
+  "parry_skills": [
+    {"weapon": "Long Knife", "score": 9}
+  ],
+  "block_skill": null,
+  "active_effects": []
+}
