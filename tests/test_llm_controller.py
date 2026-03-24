@@ -467,3 +467,167 @@ class TestApiKeyRotation:
         ctrl = LLMController(cfg)
 
         assert ctrl._api_keys == ["primary-val"]
+
+
+# ---------------------------------------------------------------------------
+# GM directive tests (Phase 4.75)
+# ---------------------------------------------------------------------------
+
+
+class TestGmDirective:
+    """Tests for gm_directive() and the on_key_rotation callback."""
+
+    def _mock_response(self, text: str = "GM reply") -> MagicMock:
+        """Build a fake litellm completion response."""
+        msg = MagicMock()
+        msg.content = text
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def _two_key_config(self, base_config: dict) -> dict:
+        cfg = dict(base_config)
+        cfg["llm"] = dict(base_config["llm"])
+        cfg["llm"]["api_key_env_fallbacks"] = ["GOOGLE_API_KEY_2"]
+        return cfg
+
+    def test_gm_directive_includes_instruction_block(
+        self, controller: LLMController
+    ) -> None:
+        """gm_directive() must include the GM directive instruction block in the system prompt."""
+        captured: list[dict] = []
+
+        def capture(*args, **kwargs):
+            captured.extend(kwargs.get("messages", []))
+            return self._mock_response()
+
+        with patch("litellm.completion", side_effect=capture):
+            controller.gm_directive("Set the scene", [], [])
+
+        system_msgs = [m for m in captured if m.get("role") == "system"]
+        assert system_msgs, "No system message found in LiteLLM call"
+        assert "GM DIRECTIVE MODE" in system_msgs[0]["content"]
+
+    def test_gm_directive_history_separate_from_game_history(
+        self, controller: LLMController
+    ) -> None:
+        """gm_directive() returns GM history that contains only GM exchanges."""
+        with patch("litellm.completion", return_value=self._mock_response("acknowledged")):
+            _, gm_hist = controller.gm_directive(
+                "NPC secret: the wizard is evil",
+                gm_history=[],
+                game_history=[{"role": "user", "content": "I search the room"}],
+            )
+
+        # GM history must contain the directive.
+        assert any("NPC secret" in m["content"] for m in gm_hist)
+        # GM history must NOT contain game channel messages.
+        assert not any("search the room" in m["content"] for m in gm_hist)
+
+    def test_gm_directive_prompt_includes_both_histories(
+        self, controller: LLMController
+    ) -> None:
+        """The system prompt must include both game channel and GM directive histories."""
+        captured: list[dict] = []
+
+        def capture(*args, **kwargs):
+            captured.extend(kwargs.get("messages", []))
+            return self._mock_response()
+
+        game_hist = [{"role": "user", "content": "player says hello"}]
+        gm_hist = [{"role": "user", "content": "previous gm directive xyz"}]
+
+        with patch("litellm.completion", side_effect=capture):
+            controller.gm_directive("new directive", gm_hist, game_hist)
+
+        system_content = next(
+            m["content"] for m in captured if m.get("role") == "system"
+        )
+        assert "player says hello" in system_content
+        assert "previous gm directive xyz" in system_content
+
+    def test_game_channel_prompt_excludes_gm_directive_content(
+        self, controller: LLMController
+    ) -> None:
+        """chat() must NOT include GM DIRECTIVE MODE in the system prompt."""
+        captured: list[dict] = []
+
+        def capture(*args, **kwargs):
+            captured.extend(kwargs.get("messages", []))
+            return self._mock_response()
+
+        with patch("litellm.completion", side_effect=capture):
+            controller.chat("player message", [])
+
+        all_content = " ".join(m.get("content", "") for m in captured)
+        assert "GM DIRECTIVE MODE" not in all_content
+
+    def test_on_key_rotation_callback_fires_on_rotation(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Callback must be called when a rate limit triggers rotation to the next key."""
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-1")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-2")
+
+        rotation_messages: list[str] = []
+        ctrl = LLMController(cfg, on_key_rotation=rotation_messages.append)
+
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise rate_err
+            return self._mock_response("ok")
+
+        with patch("litellm.completion", side_effect=side_effect):
+            ctrl.chat("hello", [])
+
+        # Rotation from key 1 to key 2 must have fired the callback.
+        assert len(rotation_messages) == 1
+        msg = rotation_messages[0]
+        assert "rate" in msg.lower() or "key" in msg.lower()
+
+    def test_on_key_rotation_callback_fires_when_all_exhausted(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Callback must be called when all keys are exhausted."""
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-1")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-2")
+
+        rotation_messages: list[str] = []
+        ctrl = LLMController(cfg, on_key_rotation=rotation_messages.append)
+
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+
+        with patch("litellm.completion", side_effect=rate_err):
+            ctrl.chat("hello", [])
+
+        # Rotation (key 1 → key 2) + exhaustion (key 2 fails) = 2 messages.
+        assert len(rotation_messages) == 2
+        exhaustion_msg = rotation_messages[-1]
+        assert "exhausted" in exhaustion_msg.lower()
+
+    def test_no_callback_when_not_configured(
+        self, controller: LLMController
+    ) -> None:
+        """When no callback is set, key rotation must not raise any exception."""
+        import litellm
+
+        assert controller._on_key_rotation is None
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+
+        with patch("litellm.completion", side_effect=rate_err):
+            reply, _ = controller.chat("hello", [])  # must not raise
+
+        assert "please try again" in reply.lower() or "api error" in reply.lower()

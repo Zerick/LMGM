@@ -2,6 +2,8 @@ bot:
   discord_token_env: AI_DM_BOT_KEY
   command_prefix: /
   main_channel: game-session
+  gm_channel: gm-control
+  gm_user_id: "236701038919286784"
 
 # Future Anthropic target (swap by changing active config below + ANTHROPIC_API_KEY in .env):
 # llm:

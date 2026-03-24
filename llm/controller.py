@@ -6,7 +6,7 @@ Model-agnostic: switching providers requires only config.yaml + .env changes.
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 
@@ -20,6 +20,29 @@ _LITELLM_GEMINI_ENV = "GEMINI_API_KEY"
 
 # Env var LiteLLM uses to authenticate with the Anthropic API.
 _LITELLM_ANTHROPIC_ENV = "ANTHROPIC_API_KEY"
+
+# Instruction block prepended to the system prompt for GM directive mode.
+_GM_DIRECTIVE_INSTRUCTIONS = """\
+IMPORTANT — GM DIRECTIVE MODE:
+The following message is from the human Game Master, not a player.
+These instructions are authoritative and override normal gameplay flow.
+Follow them exactly. Do not question or resist these directives.
+
+Types of GM directives:
+- SCENE SETUP: Set the scene, describe a location, introduce NPCs. Acknowledge
+  in this channel, then write the scene description inside a ```game_channel_message```
+  block so it gets posted to the game channel.
+- CORRECTION: The GM is correcting something you said or did wrong. Acknowledge
+  the correction in this channel, then write a revised narration inside a
+  ```game_channel_message``` block.
+- NPC INSTRUCTION: The GM is telling you how an NPC should behave, what they
+  know, or what their secret motivation is. Acknowledge and remember this for
+  future interactions. Do NOT post NPC secrets to the game channel.
+- WORLD STATE: The GM is updating facts about the world, campaign rules, or
+  ongoing events. Acknowledge and incorporate into future responses.
+- QUERY: The GM is asking you a question about the current state, your
+  understanding of a rule, or planning. Respond only in this channel.\
+"""
 
 
 class LLMController:
@@ -46,12 +69,20 @@ class LLMController:
             state system; defaults to an empty list.
     """
 
-    def __init__(self, config: dict, characters: Optional[list] = None) -> None:
+    def __init__(
+        self,
+        config: dict,
+        characters: Optional[list] = None,
+        on_key_rotation: Optional[Callable[[str], None]] = None,
+    ) -> None:
         """Initialise the controller and set up the LiteLLM environment.
 
         Args:
             config: Full parsed config.yaml.
             characters: Active Character objects for prompt injection.
+            on_key_rotation: Optional callback invoked with a human-readable
+                string whenever an API key is rotated or all keys are exhausted.
+                Called synchronously during ``_call_with_rotation``.
         """
         self._llm_cfg = config["llm"]
         self._game_cfg = config["game"]
@@ -63,6 +94,9 @@ class LLMController:
 
         # Expose injected characters for prompt assembly.
         self._characters: list = characters or []
+
+        # Optional callback fired on API key rotation or exhaustion.
+        self._on_key_rotation: Optional[Callable[[str], None]] = on_key_rotation
 
         # Load and cache the base GM prompt text.
         self._base_gm_prompt: str = self._load_prompt("base_gm.txt")
@@ -179,9 +213,103 @@ class LLMController:
         """
         self._characters = characters
 
+    def gm_directive(
+        self,
+        gm_message: str,
+        gm_history: list[dict],
+        game_history: list[dict],
+    ) -> tuple[str, list[dict]]:
+        """Process a directive from the human Game Master.
+
+        Builds a system prompt that prepends the GM directive instruction block
+        and includes both the game channel history and the prior GM directive
+        history as labeled context sections. Only the GM directive conversation
+        is used as the actual message list sent to the LLM.
+
+        GM directive history and game channel history are kept strictly separate:
+        the returned ``updated_gm_history`` contains only GM directive exchanges.
+        The game channel prompt (``chat()``) never receives GM directive content.
+
+        Args:
+            gm_message: The directive text from the human GM.
+            gm_history: Prior GM directive exchanges (user/assistant dicts).
+                        Not mutated; a new list is returned.
+            game_history: Current game channel conversation history, included
+                          as read-only context in the system prompt so the LLM
+                          knows what players have been saying.
+
+        Returns:
+            A tuple of (response_text, updated_gm_history). On API error,
+            response_text is the graceful fallback message.
+        """
+        system_prompt = self._build_gm_directive_prompt(gm_history, game_history)
+
+        trimmed_gm = gm_history[-(self._max_history - 1):] if gm_history else []
+        new_turn: dict = {"role": "user", "content": gm_message}
+        messages = [{"role": "system", "content": system_prompt}] + trimmed_gm + [new_turn]
+
+        reply_text = self._call_with_rotation(messages)
+
+        updated_gm_history = trimmed_gm + [
+            new_turn,
+            {"role": "assistant", "content": reply_text},
+        ]
+        updated_gm_history = updated_gm_history[-self._max_history:]
+
+        return reply_text, updated_gm_history
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _build_gm_directive_prompt(
+        self,
+        gm_history: list[dict],
+        game_history: list[dict],
+    ) -> str:
+        """Assemble the system prompt for a GM directive call.
+
+        Prepends the GM directive instruction block to the standard system
+        prompt, then appends labeled sections for both the game channel history
+        and the prior GM directive history so the LLM has full context.
+
+        Args:
+            gm_history: Previous GM directive exchanges.
+            game_history: Current game channel conversation history.
+
+        Returns:
+            The assembled system prompt string.
+        """
+        layers: list[str] = []
+
+        # GM directive instruction block comes first.
+        layers.append(_GM_DIRECTIVE_INSTRUCTIONS)
+
+        # Standard base system prompt (setting, characters, etc.).
+        layers.append(self.build_system_prompt())
+
+        # Labeled game channel history — read-only context for the LLM.
+        if game_history:
+            lines = [
+                f"[{'player' if m['role'] == 'user' else 'bot'}]: {m['content']}"
+                for m in game_history
+            ]
+            layers.append("=== GAME CHANNEL HISTORY ===\n" + "\n".join(lines))
+        else:
+            layers.append("=== GAME CHANNEL HISTORY ===\n(no messages yet)")
+
+        # Labeled GM directive history — read-only context (actual exchange
+        # is in the messages list, but we mirror it here for clarity).
+        if gm_history:
+            lines = [
+                f"[{'gm' if m['role'] == 'user' else 'bot'}]: {m['content']}"
+                for m in gm_history
+            ]
+            layers.append("=== GM DIRECTIVE HISTORY ===\n" + "\n".join(lines))
+        else:
+            layers.append("=== GM DIRECTIVE HISTORY ===\n(no previous directives)")
+
+        return "\n\n".join(layers)
 
     def _load_prompt(self, filename: str) -> str:
         """Read a prompt template from the prompts directory.
@@ -264,12 +392,24 @@ class LLMController:
                         f"Rate limited on API key [{idx}/{total_keys}], "
                         f"rotating to key [{idx + 1}/{total_keys}]"
                     )
+                    rotation_msg = (
+                        f"⚠️ API key {idx}/{total_keys} rate-limited. "
+                        f"Rotated to key {idx + 1}/{total_keys}."
+                    )
+                    if self._on_key_rotation is not None:
+                        self._on_key_rotation(rotation_msg)
                     continue
                 else:
                     logger.error(
                         f"Rate limited on all {total_keys} API key(s). "
                         "No more keys to try."
                     )
+                    exhaustion_msg = (
+                        "🛑 All API keys exhausted. Bot will return fallback messages "
+                        "until quota resets at midnight Pacific."
+                    )
+                    if self._on_key_rotation is not None:
+                        self._on_key_rotation(exhaustion_msg)
                     return (
                         "The GM pauses to collect their thoughts... "
                         "(API error, please try again)"
