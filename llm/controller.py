@@ -67,6 +67,10 @@ class LLMController:
         # Load and cache the base GM prompt text.
         self._base_gm_prompt: str = self._load_prompt("base_gm.txt")
 
+        # Build the ordered list of API keys for rotation.
+        # Index 0 is the primary key; subsequent entries are fallbacks.
+        self._api_keys: list[str] = self._load_api_keys()
+
         # Bridge env var: LiteLLM Gemini reads GEMINI_API_KEY; Anthropic reads
         # ANTHROPIC_API_KEY. We read whatever the config names and write it to
         # the variable LiteLLM expects for the active provider.
@@ -148,8 +152,6 @@ class LLMController:
             A tuple of (response_text, updated_history). On API error,
             response_text is a graceful fallback message.
         """
-        import litellm  # Local import so test mocks can patch easily.
-
         system_prompt = self.build_system_prompt()
 
         # Trim history to the configured window, then append the new message.
@@ -157,20 +159,7 @@ class LLMController:
         new_turn: dict = {"role": "user", "content": player_message}
         messages = [{"role": "system", "content": system_prompt}] + trimmed + [new_turn]
 
-        try:
-            response = litellm.completion(
-                model=self._model,
-                messages=messages,
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
-            )
-            reply_text: str = response.choices[0].message.content or ""
-        except Exception as exc:
-            logger.error(f"LiteLLM API error: {exc}")
-            reply_text = (
-                "The GM pauses to collect their thoughts... "
-                "(API error, please try again)"
-            )
+        reply_text = self._call_with_rotation(messages)
 
         # Build updated history (trimmed window + completed exchange).
         updated_history = trimmed + [
@@ -208,6 +197,96 @@ class LLMController:
         """
         path = _PROMPTS_DIR / filename
         return path.read_text(encoding="utf-8")
+
+    def _load_api_keys(self) -> list[str]:
+        """Build the ordered list of API keys from config env var names.
+
+        The primary key (``api_key_env``) is index 0; fallback keys from
+        ``api_key_env_fallbacks`` follow in order. Missing env vars produce
+        empty strings and are skipped.
+
+        Returns:
+            A list of non-empty API key strings. May be empty if no keys
+            are set, in which case ``_configure_api_key`` will emit a warning.
+        """
+        keys: list[str] = []
+
+        primary_env: str = self._llm_cfg["api_key_env"]
+        primary_key = os.environ.get(primary_env, "")
+        if primary_key:
+            keys.append(primary_key)
+
+        for fallback_env in self._llm_cfg.get("api_key_env_fallbacks", []):
+            fallback_key = os.environ.get(fallback_env, "")
+            if fallback_key:
+                keys.append(fallback_key)
+
+        return keys
+
+    def _call_with_rotation(self, messages: list[dict]) -> str:
+        """Call the LLM, rotating API keys on rate limit errors.
+
+        Tries each key in ``self._api_keys`` in order. On
+        ``litellm.RateLimitError``, logs a warning and retries with the next
+        key. If all keys are exhausted or any other exception occurs, returns
+        the graceful fallback message.
+
+        Actual key values are never logged.
+
+        Args:
+            messages: The assembled message list for ``litellm.completion``.
+
+        Returns:
+            The LLM response text, or a graceful fallback string on failure.
+        """
+        import litellm  # Local import so test mocks can patch easily.
+
+        total_keys = len(self._api_keys)
+        keys_to_try = self._api_keys if self._api_keys else [None]
+
+        for idx, api_key in enumerate(keys_to_try, start=1):
+            try:
+                kwargs: dict = dict(
+                    model=self._model,
+                    messages=messages,
+                    max_tokens=self._max_tokens,
+                    temperature=self._temperature,
+                )
+                if api_key is not None:
+                    kwargs["api_key"] = api_key
+
+                response = litellm.completion(**kwargs)
+                return response.choices[0].message.content or ""
+
+            except litellm.RateLimitError:
+                if idx < total_keys:
+                    logger.warning(
+                        f"Rate limited on API key [{idx}/{total_keys}], "
+                        f"rotating to key [{idx + 1}/{total_keys}]"
+                    )
+                    continue
+                else:
+                    logger.error(
+                        f"Rate limited on all {total_keys} API key(s). "
+                        "No more keys to try."
+                    )
+                    return (
+                        "The GM pauses to collect their thoughts... "
+                        "(API error, please try again)"
+                    )
+
+            except Exception as exc:
+                logger.error(f"LiteLLM API error: {exc}")
+                return (
+                    "The GM pauses to collect their thoughts... "
+                    "(API error, please try again)"
+                )
+
+        # Unreachable, but satisfies type checker.
+        return (
+            "The GM pauses to collect their thoughts... "
+            "(API error, please try again)"
+        )
 
     def _configure_api_key(self) -> None:
         """Read the API key from the env var named in config and set the env

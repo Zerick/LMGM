@@ -50,17 +50,25 @@ def _make_client(config: dict | None = None) -> tuple[GurpsGMClient, MagicMock]:
 def _make_message(
     channel_name: str,
     author: MagicMock | None = None,
+    guild: MagicMock | None = ...,  # type: ignore[assignment]
 ) -> MagicMock:
     """Build a mock discord.Message.
 
     Args:
         channel_name: The name of the channel the message is in.
         author: The author mock; defaults to a new unique MagicMock.
+        guild: The guild mock; pass ``None`` to simulate a DM. Defaults to a
+            new MagicMock (i.e. a server message).
     """
     msg = MagicMock()
     msg.channel.name = channel_name
     msg.channel.send = AsyncMock()
     msg.author = author if author is not None else MagicMock()
+    # Use sentinel default so callers can explicitly pass None for DMs.
+    if guild is ...:
+        msg.guild = MagicMock()
+    else:
+        msg.guild = guild
     return msg
 
 
@@ -171,6 +179,44 @@ def test_response_sends_something() -> None:
     asyncio.run(client.on_message(msg))
 
     msg.channel.send.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# DM lockdown (Phase 4.5)
+# ---------------------------------------------------------------------------
+
+
+def test_dm_ignored_guild_is_none() -> None:
+    """Bot must silently handle or reject DMs (guild is None) without LLM call."""
+    client, bot_user = _make_client()
+    # Simulate a direct message: guild is None.
+    msg = _make_message(GAME_CHANNEL, guild=None)
+
+    with patch.object(client, "_llm") as mock_llm:
+        asyncio.run(client.on_message(msg))
+        mock_llm.chat.assert_not_called()
+
+
+def test_dm_sends_rejection_reply() -> None:
+    """Bot must send exactly one short reply to DMs and nothing else."""
+    client, bot_user = _make_client()
+    msg = _make_message(GAME_CHANNEL, guild=None)
+
+    asyncio.run(client.on_message(msg))
+
+    msg.channel.send.assert_called_once()
+    reply = msg.channel.send.call_args[0][0]
+    assert "game channel" in reply.lower()
+
+
+def test_wrong_channel_no_llm_call() -> None:
+    """Bot must not call the LLM for messages outside the game channel."""
+    client, bot_user = _make_client()
+    msg = _make_message("off-topic")  # not game channel, not DM
+
+    with patch.object(client, "_llm") as mock_llm:
+        asyncio.run(client.on_message(msg))
+        mock_llm.chat.assert_not_called()
 
 
 def test_game_channel_name_comes_from_config() -> None:
