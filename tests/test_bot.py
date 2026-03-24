@@ -163,15 +163,14 @@ def test_responds_in_configured_game_channel() -> None:
     msg.channel.send.assert_called_once()
 
 
-def test_response_contains_phase_marker() -> None:
-    """The hardcoded reply must contain the Phase 1 identification string."""
+def test_response_sends_something() -> None:
+    """Bot must send at least one message in the game channel (Phase 4: LLM or fallback)."""
     client, bot_user = _make_client()
     msg = _make_message(GAME_CHANNEL)
 
     asyncio.run(client.on_message(msg))
 
-    reply_text: str = msg.channel.send.call_args[0][0]
-    assert "Phase 1 skeleton active" in reply_text
+    msg.channel.send.assert_called_once()
 
 
 def test_game_channel_name_comes_from_config() -> None:
