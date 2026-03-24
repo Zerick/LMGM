@@ -231,6 +231,28 @@ class TestErrorHandling:
 
         assert os.environ.get("GEMINI_API_KEY") == "my-gemini-key"
 
+    def test_graceful_fallback_when_all_keys_rate_limited(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When all keys hit rate limits, the fallback message is returned."""
+        import litellm
+
+        two_key_config = dict(base_config)
+        two_key_config["llm"] = dict(base_config["llm"])
+        two_key_config["llm"]["api_key_env_fallbacks"] = ["GOOGLE_API_KEY_2"]
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-1")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-2")
+
+        ctrl = LLMController(two_key_config)
+
+        rate_limit_exc = litellm.RateLimitError("rate limited", 429, None)
+
+        with patch("litellm.completion", side_effect=rate_limit_exc):
+            reply, _ = ctrl.chat("hello", [])
+
+        assert "please try again" in reply.lower() or "api error" in reply.lower()
+
     def test_api_key_env_mapping_anthropic(
         self, base_config: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -249,3 +271,199 @@ class TestErrorHandling:
 
         assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-test"
         assert ctrl._model == "claude-sonnet-4-20250514"
+
+
+# ---------------------------------------------------------------------------
+# API key rotation tests (Phase 4.5)
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyRotation:
+    """Tests for the key rotation behaviour added in Phase 4.5."""
+
+    def _two_key_config(self, base_config: dict) -> dict:
+        """Return a config that has a primary and one fallback key env var."""
+        cfg = dict(base_config)
+        cfg["llm"] = dict(base_config["llm"])
+        cfg["llm"]["api_key_env_fallbacks"] = ["GOOGLE_API_KEY_2"]
+        return cfg
+
+    def _mock_response(self, text: str = "GM reply") -> MagicMock:
+        msg = MagicMock()
+        msg.content = text
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def test_rotates_to_second_key_on_rate_limit(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """First key raises RateLimitError; second key succeeds; valid reply returned."""
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-primary")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-fallback")
+
+        ctrl = LLMController(cfg)
+        assert ctrl._api_keys == ["key-primary", "key-fallback"]
+
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+        success_resp = self._mock_response("Here is the GM reply.")
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise rate_err
+            return success_resp
+
+        with patch("litellm.completion", side_effect=side_effect):
+            reply, _ = ctrl.chat("attack the goblin", [])
+
+        assert reply == "Here is the GM reply."
+        assert call_count == 2
+
+    def test_rotation_uses_correct_key_in_api_key_param(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The api_key kwarg passed to litellm must switch to the fallback key."""
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-primary")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-fallback")
+
+        ctrl = LLMController(cfg)
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+        success_resp = self._mock_response("ok")
+
+        seen_keys: list[str] = []
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            seen_keys.append(kwargs.get("api_key", ""))
+            if call_count == 1:
+                raise rate_err
+            return success_resp
+
+        with patch("litellm.completion", side_effect=side_effect):
+            ctrl.chat("hello", [])
+
+        assert seen_keys[0] == "key-primary"
+        assert seen_keys[1] == "key-fallback"
+
+    def test_rotation_logs_warning(
+        self,
+        base_config: dict,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A WARNING must be logged when rotating to a fallback key."""
+        import logging
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-primary")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-fallback")
+
+        ctrl = LLMController(cfg)
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise rate_err
+            return self._mock_response("ok")
+
+        with caplog.at_level(logging.WARNING, logger="llm.controller"):
+            with patch("litellm.completion", side_effect=side_effect):
+                ctrl.chat("hello", [])
+
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("rotating" in m.lower() for m in warning_messages)
+
+    def test_warning_does_not_log_key_values(
+        self,
+        base_config: dict,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Actual API key strings must never appear in log output."""
+        import logging
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "secret-primary-key-abc123")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "secret-fallback-key-xyz789")
+
+        ctrl = LLMController(cfg)
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise rate_err
+            return self._mock_response("ok")
+
+        with caplog.at_level(logging.DEBUG, logger="llm.controller"):
+            with patch("litellm.completion", side_effect=side_effect):
+                ctrl.chat("hello", [])
+
+        all_log_text = " ".join(r.message for r in caplog.records)
+        assert "secret-primary-key-abc123" not in all_log_text
+        assert "secret-fallback-key-xyz789" not in all_log_text
+
+    def test_all_keys_exhausted_returns_fallback_message(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If every key raises RateLimitError, the graceful fallback is returned."""
+        import litellm
+
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "key-primary")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "key-fallback")
+
+        ctrl = LLMController(cfg)
+        rate_err = litellm.RateLimitError("rate limited", 429, None)
+
+        with patch("litellm.completion", side_effect=rate_err):
+            reply, _ = ctrl.chat("hello", [])
+
+        assert "please try again" in reply.lower() or "api error" in reply.lower()
+
+    def test_loads_both_keys_from_env(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Controller must populate _api_keys with primary and fallback values."""
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "primary-val")
+        monkeypatch.setenv("GOOGLE_API_KEY_2", "fallback-val")
+
+        ctrl = LLMController(cfg)
+
+        assert ctrl._api_keys == ["primary-val", "fallback-val"]
+
+    def test_missing_fallback_env_var_skipped(
+        self, base_config: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the fallback env var is not set, it is silently skipped."""
+        cfg = self._two_key_config(base_config)
+        monkeypatch.setenv("GOOGLE_API_KEY", "primary-val")
+        monkeypatch.delenv("GOOGLE_API_KEY_2", raising=False)
+
+        ctrl = LLMController(cfg)
+
+        assert ctrl._api_keys == ["primary-val"]

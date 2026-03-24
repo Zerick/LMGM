@@ -113,6 +113,12 @@ class GurpsGMClient(discord.Client):
         if message.author == self.user:
             return
 
+        # Security: never process DMs. Unmonitored DM channels allow prompt
+        # injection attempts that the GM and other players cannot see.
+        if message.guild is None:
+            await message.channel.send("I only respond in the game channel.")
+            return
+
         if message.channel.name != self._game_channel:
             return
 
