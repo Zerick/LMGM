@@ -47,6 +47,17 @@ gurps-gm/
 5. **All config in config.yaml.** No hardcoded values. API keys in .env only.
 6. **Pydantic models for all data structures.** Characters, combat results, scene state — typed and validated.
 
+## Design Decisions
+These are settled design choices. Read before implementing any phase that touches
+the relevant modules.
+
+- **NPC consistency via `notes` field:** The `Character` model has a `notes: str = ""`
+  field for freeform personality, voice, relationships, and secrets. Populated manually
+  by the GM for important NPCs. Appears in the LLM character summary (via
+  `to_llm_summary()`) only when non-empty, so blank mook NPCs waste no tokens.
+  Auto-generation of notes from session events is a planned future extensibility
+  feature (see blueprint Section 11.3). Never remove this field or make it required.
+
 ## Commands
 ```bash
 # Activate virtual environment
