@@ -68,6 +68,7 @@ class Character(BaseModel):
     name: str
     player_discord_id: str
     point_total: int
+    notes: str = ""
 
     # --- Primary Attributes ---
     ST: int
@@ -200,5 +201,9 @@ class Character(BaseModel):
             lines.append(f"Status: {', '.join(all_status)}")
         else:
             lines.append("Status: healthy, no active effects")
+
+        # Notes (GM-written personality/relationship text — only injected if present)
+        if self.notes:
+            lines.append(f"Notes: {self.notes}")
 
         return "\n".join(lines)

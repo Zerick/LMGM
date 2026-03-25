@@ -285,6 +285,7 @@ class TestCharacterSerialization:
         assert len(c2.skills) == len(c.skills)
         assert len(c2.advantages) == len(c.advantages)
         assert len(c2.equipment) == len(c.equipment)
+        assert c2.notes == ""
 
     def test_json_round_trip_derived_preserved(self):
         """Derived fields stored explicitly survive round-trip."""
